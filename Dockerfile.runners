@@ -1,0 +1,75 @@
+# =========================================================
+# Custom n8n Task Runner image
+#
+# Stage 1 (builder): turns every package in requirements.txt
+#   into a wheel. Packages with no ready-made wheel for this
+#   CPU (e.g. scikit-learn on Apple Silicon) are compiled here,
+#   and auditwheel bundles the system libraries they need
+#   (libgomp, libstdc++, openblas...) INSIDE the wheel.
+#
+# Stage 2 (runner): installs those wheels with uv into the
+#   runner's own Python environment. No compiler is needed
+#   there and no .so files are copied by hand.
+#
+# The version comes from N8N_VERSION in .env (passed in by
+# compose.yaml), so runner and n8n always match.
+# =========================================================
+
+ARG N8N_VERSION=2.40.5
+
+
+# =========================================================
+# Stage 1 - Build wheels
+# Python minor version must match the runner (currently 3.13).
+# =========================================================
+
+FROM python:3.13-alpine3.24 AS builder
+
+RUN apk add --no-cache \
+    build-base \
+    gfortran \
+    musl-dev \
+    linux-headers \
+    openblas-dev \
+    lapack-dev \
+    patchelf
+
+RUN pip install --no-cache-dir auditwheel
+
+COPY requirements.txt /tmp/requirements.txt
+
+RUN pip wheel --no-cache-dir --wheel-dir /tmp/raw -r /tmp/requirements.txt \
+ && mkdir -p /wheels \
+ && for whl in /tmp/raw/*.whl; do \
+      case "$whl" in \
+        *-none-any.whl|*musllinux*|*manylinux*) cp "$whl" /wheels/ ;; \
+        *) auditwheel repair --wheel-dir /wheels "$whl" ;; \
+      esac; \
+    done \
+ && ls -1 /wheels
+
+
+# =========================================================
+# Stage 2 - n8n Task Runner
+# =========================================================
+
+FROM n8nio/runners:${N8N_VERSION}
+
+USER root
+
+COPY requirements.txt /tmp/requirements.txt
+COPY --from=builder /wheels /tmp/wheels
+
+# Install ONLY from the wheels built above (no internet, no compiling)
+RUN uv pip install \
+        --no-cache \
+        --no-index \
+        --find-links /tmp/wheels \
+        --python /opt/runners/task-runner-python/.venv/bin/python \
+        -r /tmp/requirements.txt \
+ && rm -rf /tmp/wheels /tmp/requirements.txt
+
+# Runner configuration (which imports are allowed)
+COPY n8n-task-runners.json /etc/n8n-task-runners.json
+
+USER runner

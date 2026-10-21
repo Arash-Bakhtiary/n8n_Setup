@@ -1,0 +1,23 @@
+# Environment secrets
+.env
+
+# Python virtual environments
+.venv/
+venv/
+
+# Backup files
+backups/
+*.tar.gz
+*.zip
+
+# macOS files
+.DS_Store
+
+# IDE files
+.idea/
+
+# Cloudflare credentials
+cloudflared/*.json
+
+# Logs
+*.log

@@ -1,0 +1,91 @@
+# =========================================================
+# n8n self-hosted (Docker Compose)
+#
+# Start / update everything:   docker compose up -d --build
+# Stop:                        docker compose down
+#
+# Do NOT run "docker compose down -v" unless you want to
+# delete ALL workflows, credentials and users.
+# =========================================================
+
+# Fixed project name, so the data volume is always called
+# "n8n_setup_n8n_data", no matter what the folder is named.
+name: n8n_setup
+
+services:
+
+  n8n:
+    image: n8nio/n8n:${N8N_VERSION:?Set N8N_VERSION in .env (run setup.sh or setup.ps1 first)}
+    container_name: n8n
+    restart: unless-stopped
+
+    # 127.0.0.1 = only reachable from this computer, not from
+    # other devices on the same Wi-Fi. Cloudflare Quick Tunnel
+    # still works, because cloudflared runs on this computer.
+    ports:
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
+
+    environment:
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Europe/Stockholm}
+      - TZ=${GENERIC_TIMEZONE:-Europe/Stockholm}
+
+      # Security
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:?Missing N8N_ENCRYPTION_KEY in .env (run setup.sh or setup.ps1 first)}
+
+      # External Task Runner
+      - N8N_RUNNERS_MODE=external
+      - N8N_RUNNERS_BROKER_LISTEN_ADDRESS=0.0.0.0
+      - N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN:?Missing N8N_RUNNERS_AUTH_TOKEN in .env (run setup.sh or setup.ps1 first)}
+      - N8N_NATIVE_PYTHON_RUNNER=true
+
+      # Public URLs / Webhooks
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL:-http://localhost:5678/}
+
+      # Reverse proxy / Cloudflare
+      - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
+
+    volumes:
+      # All n8n data: workflows, credentials, users, settings
+      - n8n_data:/home/node/.n8n
+      # Backup exports land in the project's backups/ folder
+      - ./backups:/backups
+
+    # Lets the runner wait until n8n is really ready
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:5678/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+
+  task-runners:
+    build:
+      context: .
+      dockerfile: Dockerfile.runners
+      args:
+        # Runner version ALWAYS equals the n8n version
+        N8N_VERSION: ${N8N_VERSION}
+
+    image: n8n-runners-custom:${N8N_VERSION}
+    pull_policy: build
+    container_name: n8n-runners
+    restart: unless-stopped
+
+    environment:
+      - N8N_RUNNERS_TASK_BROKER_URI=http://n8n:5679
+      - N8N_RUNNERS_AUTH_TOKEN=${N8N_RUNNERS_AUTH_TOKEN}
+
+    depends_on:
+      n8n:
+        condition: service_healthy
+
+
+volumes:
+  n8n_data:

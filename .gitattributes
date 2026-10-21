@@ -1,0 +1,11 @@
+# Keep Unix line endings for files used inside Linux containers
+# and for shell scripts, even when cloned on Windows.
+*.sh                text eol=lf
+Dockerfile*         text eol=lf
+compose.yaml        text eol=lf
+requirements.txt    text eol=lf
+*.json              text eol=lf
+.env.example        text eol=lf
+
+# PowerShell scripts use Windows line endings
+*.ps1               text eol=crlf
